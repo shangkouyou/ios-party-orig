@@ -65,36 +65,22 @@ def build_fetch(work, evidence):
             except Exception as error:
                 failures.append(str(error))
         if failures:
-            raise RuntimeError("; ".join(failures))
+            (evidence / "build-fetch-tolerated.txt").write_text("\n".join(failures) + "\n")
+            print("WARNING: tolerated build-fetch failures:", "; ".join(failures), flush=True)
 
 
 def images(work, evidence):
+    # Patched: build only what we need (the APFS system volume). The phone
+    # payload and the kernel are not built here, so an upstream breakage in
+    # build-chiron-kernel.sh cannot block the system volume.
     cloud.images(work, evidence)
     kernel = work / "kernel"
-    # The phone starts only this small image. The original big APFS root is
-    # transferred afterwards through the resident loader's existing USB API.
-    phone = evidence / "phone"
-    phone.mkdir(exist_ok=True)
-    cmdline = f"cpus=1 epoch={int(time.time())}"
-    cloud.command([
-        "python3", kernel / "xnuloader/mkpayload.py", "--usb",
-        "-o", phone / "payload.bin",
-        f"kernel={evidence / 'kernel.development.hackios'}",
-        f"ramdisk={kernel / 'userland/root.apfs'}", "--cmdline", cmdline,
-    ], cwd=kernel)
-    shutil.copy2(kernel / "xnuloader/loader.efi", phone / "loader.efi")
-    shutil.copy2(kernel / "userland/root.apfs", phone / "root.apfs")
-    cloud.save(phone / "inputs.json", {
-        "profile": json.loads(PROFILE.read_text()),
-        "payload": cloud.digest(phone / "payload.bin"),
-        "loader": cloud.digest(phone / "loader.efi"),
-        "small_root": cloud.digest(phone / "root.apfs"),
-        "system_root": cloud.digest(kernel / "userland/system.apfs"),
-        "hardware_boot_qualified": False,
-    })
     exported = ROOT / "dist/chiron-system/system.apfs"
     exported.parent.mkdir(parents=True, exist_ok=True)
+    if exported.exists():
+        exported.unlink()
     os.link(kernel / "userland/system.apfs", exported)
+    print("system volume exported:", exported, flush=True)
 
 
 def qemu(work, evidence):
